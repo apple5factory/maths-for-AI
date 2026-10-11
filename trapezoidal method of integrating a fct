@@ -1,0 +1,18 @@
+import math
+
+def f(x):
+  
+  return math.cos(x**2+1)
+
+def trapezoidal(a,b,n)
+
+  h=a+b/n
+
+  total=f(a)+f(b)/2
+  
+  for i in range(1,n):
+  
+    total+=f(a+ih)
+
+return h*total
+
