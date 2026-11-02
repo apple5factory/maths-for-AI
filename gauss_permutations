@@ -1,0 +1,145 @@
+"""
+Gauss elimination for linear systems Ax = b with three pivoting strategies:
+  1. Row permutation only when the pivot is zero ("simple pivoting")
+  2. Partial pivoting  (largest |a_ik| in the current column)
+  3. Total pivoting    (largest |a_ij| in the whole remaining submatrix)
+"""
+import numpy as np
+
+
+def back_substitution(U, c):
+    n = len(c)
+    x = np.zeros(n)
+    for i in range(n - 1, -1, -1):
+        if U[i, i] == 0:
+            raise ValueError("Singular matrix (zero on the diagonal).")
+        x[i] = (c[i] - U[i, i + 1:] @ x[i + 1:]) / U[i, i]
+    return x
+
+
+def gauss(A, b, strategy="partial"):
+    """Solve Ax = b. strategy in {'simple', 'partial', 'total'}.
+    Returns (x, info) where info holds the number of swaps and comparisons."""
+    A = np.array(A, dtype=float)
+    b = np.array(b, dtype=float)
+    n = len(b)
+    col_perm = np.arange(n)          # tracks column swaps (total pivoting)
+    swaps, comps = 0, 0
+
+    for k in range(n - 1):
+        # ---------- pivot selection ----------
+        if strategy == "simple":
+            p, q = k, k
+            if A[k, k] == 0:                      # swap only if pivot is zero
+                for i in range(k + 1, n):
+                    comps += 1
+                    if A[i, k] != 0:
+                        p = i
+                        break
+        elif strategy == "partial":
+            sub = np.abs(A[k:, k])
+            p, q = k + int(np.argmax(sub)), k
+            comps += n - k - 1
+        elif strategy == "total":
+            sub = np.abs(A[k:, k:])
+            idx = int(np.argmax(sub))
+            p, q = k + idx // (n - k), k + idx % (n - k)
+            comps += (n - k) ** 2 - 1
+        else:
+            raise ValueError("unknown strategy")
+
+        if A[p, q] == 0:
+            raise ValueError("Singular matrix (no non-zero pivot).")
+
+        # ---------- swaps ----------
+        if p != k:
+            A[[k, p]] = A[[p, k]]
+            b[[k, p]] = b[[p, k]]
+            swaps += 1
+        if q != k:
+            A[:, [k, q]] = A[:, [q, k]]
+            col_perm[[k, q]] = col_perm[[q, k]]
+            swaps += 1
+
+        # ---------- elimination ----------
+        for i in range(k + 1, n):
+            m = A[i, k] / A[k, k]
+            A[i, k:] -= m * A[k, k:]
+            b[i] -= m * b[k]
+
+    if A[n - 1, n - 1] == 0:
+        raise ValueError("Singular matrix.")
+    y = back_substitution(A, b)
+    x = np.zeros(n)
+    x[col_perm] = y                  # undo column permutation
+    return x, {"swaps": swaps, "comparisons": comps}
+
+
+def report(name, A, b, x_exact=None):
+    A = np.array(A, dtype=float)
+    b = np.array(b, dtype=float)
+    print(f"\n=== {name} ===")
+    for s in ("simple", "partial", "total"):
+        try:
+            x, info = gauss(A, b, s)
+            res = np.linalg.norm(A @ x - b, np.inf)
+            line = f"{s:8s} residual={res:.3e}"
+            if x_exact is not None:
+                line += f"  error={np.linalg.norm(x - x_exact, np.inf):.3e}"
+            line += f"  swaps={info['swaps']} comps={info['comparisons']}"
+            print(line)
+        except ValueError as e:
+            print(f"{s:8s} FAILED: {e}")
+
+
+def wilkinson(n):
+    """Matrix with growth factor 2^(n-1) under partial pivoting."""
+    A = np.eye(n) - np.tril(np.ones((n, n)), -1)
+    A[:, -1] = 1.0
+    return A
+
+
+def hilbert(n):
+    i, j = np.indices((n, n))
+    return 1.0 / (i + j + 1)
+
+
+if __name__ == "__main__":
+    # Example 1: zero pivot
+    A1 = [[0, 2, 1], [1, 1, 1], [2, 1, 3]]
+    b1 = [5, 6, 13]
+    report("Example 1: zero pivot", A1, b1, np.linalg.solve(A1, b1))
+
+    # Example 2: tiny pivot
+    A2 = [[1e-20, 1], [1, 1]]
+    b2 = [1, 2]
+    report("Example 2: tiny pivot 1e-20", A2, b2, np.array([1.0, 1.0]))
+
+    # Example 3: Hilbert matrix
+    n = 10
+    H = hilbert(n)
+    xe = np.ones(n)
+    report("Example 3: Hilbert 10x10", H, H @ xe, xe)
+
+    # Example 4: Wilkinson growth matrix
+    n = 60
+    W = wilkinson(n)
+    xe = np.ones(n)
+    report("Example 4: Wilkinson 60x60", W, W @ xe, xe)
+
+    # Example 5: random matrix + timing
+    import time
+    rng = np.random.default_rng(0)
+    n = 150
+    R = rng.standard_normal((n, n))
+    xe = rng.standard_normal(n)
+    print("\n=== Example 5: random 150x150 ===")
+    for s in ("simple", "partial", "total"):
+        t = time.perf_counter()
+        x, info = gauss(R, R @ xe, s)
+        dt = time.perf_counter() - t
+        print(f"{s:8s} error={np.linalg.norm(x-xe, np.inf):.3e} "
+              f"time={dt:.3f}s comps={info['comparisons']}")
+
+    # Example 6: singular matrix
+    report("Example 6: singular matrix", [[1, 2], [2, 4]], [1, 2])
